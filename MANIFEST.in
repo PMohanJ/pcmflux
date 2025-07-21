@@ -1,3 +1,1 @@
 graft pcmflux
-include src/CMakeLists.txt
-include src/audio_capture_module.cpp

@@ -1,10 +1,9 @@
 import asyncio
 import ctypes
-import http.server
+import mimetypes
 import os
-import socketserver
-import threading
 import websockets
+import websockets.asyncio.server as ws_async
 
 from pcmflux import AudioCapture, AudioCaptureSettings, AudioChunkCallback
 
@@ -59,7 +58,7 @@ async def send_audio_chunks():
     finally:
         print("Audio chunk broadcasting task finished.")
 
-async def health_check(path, request_headers):
+async def health_check(connection, request):
     """
     A pre-processor for incoming connections to the WebSocket port.
 
@@ -67,9 +66,9 @@ async def health_check(path, request_headers):
     (e.g., for /favicon.ico), and handles them gracefully. This prevents
     WebSocket handshake errors from cluttering the console.
     """
-    if path == "/favicon.ico":
+    if request.path == "/favicon.ico":
         # Return a "204 No Content" response for favicon requests.
-        return http.HTTPStatus.NO_CONTENT, [], b""
+        return connection.respond(204, headers=[], body=b"")
     # Allow all other requests to proceed to the WebSocket handler.
     return None
 
@@ -153,24 +152,48 @@ def py_audio_callback(result_ptr, user_data):
     # The pcmflux Python wrapper automatically frees the underlying C++ memory
     # after this function returns.
 
-def start_http_server(port=9001):
-    """
-    Serves the demo's HTML file (`index.html`) on the specified port.
+async def handle_http_request(reader, writer):
+    """Handle HTTP requests by serving static files from the script directory."""
+    try:
+        request_line = await reader.readline()
+        if not request_line:
+            return
 
-    This runs in a separate thread so it does not block the main asyncio loop.
-    """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+        parts = request_line.split()
+        if len(parts) < 2 or parts[0] != b'GET':
+            writer.write(b'HTTP/1.1 405 Method Not Allowed\r\n\r\n')
+            return
 
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=script_dir, **kwargs)
-        # Suppress the default HTTP request logging to keep the console clean.
-        def log_message(self, format, *args):
-            pass
+        path = parts[1].decode()
+        if path == '/':
+            path = '/index.html'
 
-    with socketserver.TCPServer(("localhost", port), Handler) as httpd:
-        print(f"HTTP server serving on http://localhost:{port}/index.html")
-        httpd.serve_forever()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(script_dir, path.lstrip('/'))
+
+        # Security check: prevent directory traversal
+        if not full_path.startswith(script_dir):
+            writer.write(b'HTTP/1.1 403 Forbidden\r\n\r\n')
+            return
+
+        if os.path.isfile(full_path):
+            with open(full_path, 'rb') as f:
+                content = f.read()
+
+            content_type = mimetypes.guess_type(full_path)[0] or 'application/octet-stream'
+
+            headers = f'HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n'
+            writer.write(headers.encode())
+            writer.write(content)
+        else:
+            writer.write(b'HTTP/1.1 404 Not Found\r\n\r\n')
+
+    except Exception as e:
+        print(f"[HTTP Error] {e}")
+        writer.write(b'HTTP/1.1 500 Internal Server Error\r\n\r\n')
+    finally:
+        await writer.drain()
+        writer.close()
 
 async def main_async():
     """The main routine to initialize and run the servers."""
@@ -199,12 +222,15 @@ async def main_async():
     g_module = AudioCapture()
     print("pcmflux audio capture module initialized.")
 
-    # Start the simple HTTP server in a daemon thread.
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
+    # Start HTTP server using asyncio
+    http_server = await asyncio.start_server(
+        handle_http_request, 'localhost', 9001
+    )
+    print(f"HTTP server is serving files from current directory")
+    print(f"-> Open http://localhost:9001/index.html in your browser.")
 
     # Start the WebSocket server.
-    ws_server = await websockets.serve(
+    ws_server = await ws_async.serve(
         ws_handler,
         'localhost',
         9000,
@@ -224,8 +250,9 @@ async def main_async():
             g_module.stop_capture()
         if g_send_task:
             g_send_task.cancel()
-        ws_server.close()
-        await ws_server.wait_closed()
+        if ws_server:
+            ws_server.close()
+            await ws_server.wait_closed()
         if g_module:
             del g_module
         print("Cleanup complete.")

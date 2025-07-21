@@ -19,7 +19,7 @@ sudo apt-get install libpulse-dev libopus-dev
 - **Opus Encoding:** Integrates the high-quality, low-latency Opus codec.
 - **Silence Detection:** Intelligently skips encoding and sending silent audio chunks.
 - **Python `ctypes` Wrapper:** Provides a clean and simple Python API over a high-performance C++ core.
-- **CMake Build System:** Uses a robust CMake setup for compiling the C++ module and its dependencies.
+- **Python Build System:** Uses a robust Python build setup for compiling the C++ module and its dependencies.
 
 ## Example Usage
 

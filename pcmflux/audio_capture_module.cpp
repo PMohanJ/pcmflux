@@ -25,7 +25,7 @@
 #include <thread>
 #include <vector>
 
-#include <opus.h>
+#include <opus/opus.h>
 #include <pulse/error.h>
 #include <pulse/simple.h>
 
