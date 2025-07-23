@@ -1,3 +1,31 @@
 [build-system]
-requires = ["setuptools", "wheel", "cmake"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel]
+archs = [ "x86_64", "aarch64" ]
+
+[tool.cibuildwheel.linux]
+before-all = """
+    set -euxo pipefail
+    if command -v dnf; then
+        dnf localinstall -y --nogpgcheck https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm && \
+        dnf localinstall -y --nogpgcheck https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-8.noarch.rpm && \
+        dnf localinstall -y --nogpgcheck https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm && \
+        dnf install -y \
+            pulseaudio-libs-devel \
+            opus-devel \
+            gcc \
+            gcc-c++ && \
+        ldconfig
+
+    elif command -v apk; then
+        apk add --no-cache \
+            pulseaudio-dev \
+            opus-dev \
+            musl-dev 
+    else
+        echo "Unsupported package manager"
+        exit 1
+    fi
+"""
