@@ -42,6 +42,7 @@ struct AudioCaptureSettings {
   int frame_duration_ms;
   bool use_vbr;
   bool use_silence_gate;
+  bool debug_logging;
 
   /**
    * @brief Default constructor for AudioCaptureSettings.
@@ -54,7 +55,8 @@ struct AudioCaptureSettings {
       opus_bitrate(128000),
       frame_duration_ms(20),
       use_vbr(true),
-      use_silence_gate(true) {}
+      use_silence_gate(true),
+      debug_logging(false) {}
 
   /**
    * @brief Parameterized constructor for AudioCaptureSettings.
@@ -74,7 +76,8 @@ struct AudioCaptureSettings {
       opus_bitrate(br),
       frame_duration_ms(dur),
       use_vbr(vbr),
-      use_silence_gate(gate) {}
+      use_silence_gate(gate),
+      debug_logging(debug_logging) {}
 };
 
 /**
@@ -292,6 +295,7 @@ private:
               << ", Bitrate: " << local_settings.opus_bitrate / 1000 << " kbps"
               << ", VBR: " << (local_settings.use_vbr ? "On" : "Off (CBR)")
               << ", Silence Gate: " << (local_settings.use_silence_gate ? "On" : "Off")
+              << ", Debug Logging: " << (local_settings.debug_logging ? "On" : "Off")
               << ", PCM Chunk: " << pcm_chunk_size_bytes << " bytes"
               << std::endl;
 
@@ -358,7 +362,7 @@ private:
           std::chrono::duration_cast<std::chrono::milliseconds>(now -
                                                                 last_log_time)
               .count();
-      if (elapsed_ms >= 2000) {
+      if (local_settings.debug_logging && elapsed_ms >= 2000) {
         double seconds = elapsed_ms / 1000.0;
         double kbps = (bytes_encoded * 8) / (seconds * 1000.0);
         double silent_percent =

@@ -215,6 +215,7 @@ async def main_async():
     g_settings.frame_duration_ms = 20
     g_settings.use_vbr = True
     g_settings.use_silence_gate = False
+    g_settings.debug_logging = True
     # --- End Configuration ---
 
     # Create the C-compatible callback object.
