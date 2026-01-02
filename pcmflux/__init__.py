@@ -24,6 +24,7 @@ class AudioChunkEncodeResult(ctypes.Structure):
     _fields_ = [
         ("size", ctypes.c_int),
         ("data", ctypes.POINTER(ctypes.c_ubyte)),
+        ("pts", ctypes.c_uint64),
     ]
 
 # Defines the function signature for the callback passed to the C++ library.
@@ -76,6 +77,9 @@ def _load_shared_library():
         ctypes.POINTER(AudioChunkEncodeResult)
     ]
 
+    lib.update_audio_bitrate.restype = None
+    lib.update_audio_bitrate.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
     return lib
 
 # Load the library and assign functions to module-level variables.
@@ -85,7 +89,7 @@ _destroy_module = _lib.destroy_audio_capture_module
 _start_capture = _lib.start_audio_capture
 _stop_capture = _lib.stop_audio_capture
 _free_result_data = _lib.free_audio_chunk_encode_result_data
-
+_update_bitrate = _lib.update_audio_bitrate
 
 # --- Main Python Wrapper Class ---
 
@@ -153,3 +157,9 @@ class AudioCapture:
                 # The C++ module allocates the result data; this wrapper is
                 # responsible for ensuring it is freed via the C API.
                 _free_result_data(result_ptr)
+
+    def update_audio_bitrate(self, new_bitrate: int):
+        """Updates the Opus bitrate during an active capture session."""
+        if not self._is_capturing:
+            raise RuntimeError("Cannot update bitrate when capture is not active.")
+        _update_bitrate(self._module_handle, new_bitrate)

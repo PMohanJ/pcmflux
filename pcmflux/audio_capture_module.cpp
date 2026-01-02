@@ -69,7 +69,7 @@ struct AudioCaptureSettings {
    * @param vbr Flag to enable Variable Bitrate (true) or Constant Bitrate (false).
    * @param gate Flag to enable the silence detection gate (true) or disable it (false).
    */
-  AudioCaptureSettings(const char* dev, uint32_t sr, int ch, int br, int dur, bool vbr, bool gate)
+  AudioCaptureSettings(const char* dev, uint32_t sr, int ch, int br, int dur, bool vbr, bool gate, bool debug_logging)
     : device_name(dev),
       sample_rate(sr),
       channels(ch),
@@ -88,12 +88,13 @@ struct AudioCaptureSettings {
 struct AudioChunkEncodeResult {
   int size;
   unsigned char* data;
+  uint64_t pts;
 
   /**
    * @brief Default constructor for AudioChunkEncodeResult.
    * Initializes members to default/null values.
    */
-  AudioChunkEncodeResult() : size(0), data(nullptr) {}
+  AudioChunkEncodeResult() : size(0), data(nullptr), pts(0) {}
 
   /**
    * @brief Move constructor for AudioChunkEncodeResult.
@@ -104,6 +105,7 @@ struct AudioChunkEncodeResult {
     : size(other.size), data(other.data) {
     other.size = 0;
     other.data = nullptr;
+    other.pts = 0;
   }
 
   /**
@@ -117,8 +119,10 @@ struct AudioChunkEncodeResult {
       delete[] data;
       size = other.size;
       data = other.data;
+      pts = other.pts;
       other.size = 0;
       other.data = nullptr;
+      other.pts = 0;
     }
     return *this;
   }
@@ -305,8 +309,27 @@ private:
     long chunks_encoded = 0;
     long bytes_encoded = 0;
     bool first_sound_detected = false;
+    uint64_t total_samples_processed = 0;
+    int current_applied_bitrate = local_settings.opus_bitrate;
 
     while (!stop_requested) {
+      {
+        AudioCaptureSettings latest_settings = get_current_settings();
+        // Handle Bitrate Change
+        if (latest_settings.opus_bitrate != current_applied_bitrate) {
+            int ret = opus_encoder_ctl(encoder, OPUS_SET_BITRATE(latest_settings.opus_bitrate));
+            if (ret == OPUS_OK) {
+                std::cout << "[pcmflux] Dynamic Bitrate Update: " 
+                                << (current_applied_bitrate / 1000) << " -> " 
+                                << (latest_settings.opus_bitrate / 1000) << " kbps" 
+                                << std::endl;
+                current_applied_bitrate = latest_settings.opus_bitrate;
+            } else {
+                std::cerr << "[pcmflux] Failed to update bitrate: " << opus_strerror(ret) << std::endl;
+            }
+        }
+      }
+
       if (pa_simple_read(s, pcm_buffer.data(), pcm_chunk_size_bytes,
                          &pa_error) < 0) {
         std::cerr << "[pcmflux] ERROR: pa_simple_read() failed: "
@@ -314,6 +337,9 @@ private:
         break;
       }
       chunks_read++;
+      
+      uint64_t current_pts = total_samples_processed;
+      total_samples_processed += frame_size_per_channel;
 
       bool is_silent = false;
       if (local_settings.use_silence_gate) {
@@ -352,6 +378,7 @@ private:
           AudioChunkEncodeResult result;
           result.size = encoded_bytes;
           result.data = new unsigned char[encoded_bytes];
+          result.pts = current_pts;
           std::memcpy(result.data, opus_buffer.data(), encoded_bytes);
           chunk_callback(&result, user_data);
         }
@@ -433,6 +460,20 @@ extern "C" {
       module->chunk_callback = callback;
       module->user_data = user_data;
       module->start_capture();
+    }
+  }
+
+  /**
+   * @brief Updates the Opus encoder bitrate during an active capture session.
+   * @param handle Handle to the AudioCaptureModule instance.
+   * @param new_bitrate The new target bitrate in bits per second.
+   */
+  void update_audio_bitrate(AudioCaptureModuleHandle handle, int new_bitrate) {
+    if (handle) {
+      auto module = static_cast<AudioCaptureModule*>(handle);
+      AudioCaptureSettings current_settings = module->get_current_settings();
+      current_settings.opus_bitrate = new_bitrate;
+      module->modify_settings(current_settings);
     }
   }
 
